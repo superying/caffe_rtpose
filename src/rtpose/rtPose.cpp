@@ -41,86 +41,6 @@
 #include "rtpose/rtPose.hpp"
 
 
-// global queues for I/O
-struct Global {
-    caffe::BlockingQueue<Frame> input_queue; //have to pop
-    caffe::BlockingQueue<Frame> output_queue; //have to pop
-    caffe::BlockingQueue<Frame> output_queue_ordered;
-    caffe::BlockingQueue<Frame> output_queue_mated;
-    std::priority_queue<int, std::vector<int>, std::greater<int> > dropped_index;
-    std::vector< std::string > image_list;
-    std::mutex mutex;
-    int part_to_show;
-    bool quit_threads;
-    // Parameters
-    float nms_threshold;
-    int connect_min_subset_cnt;
-    float connect_min_subset_score;
-    float connect_inter_threshold;
-    int connect_inter_min_above_threshold;
-
-    struct UIState {
-        UIState() :
-            is_fullscreen(0),
-            is_video_paused(0),
-            is_shift_down(0),
-            is_googly_eyes(0),
-            current_frame(0),
-            seek_to_frame(-1),
-            fps(0) {}
-        bool is_fullscreen;
-        bool is_video_paused;
-        bool is_shift_down;
-        bool is_googly_eyes;
-        int current_frame;
-        int seek_to_frame;
-        double fps;
-    };
-    UIState uistate;
- };
-
-// network copy for each gpu thread
-struct NetCopy {
-    caffe::Net<float> *person_net;
-    std::vector<int> num_people;
-    int nblob_person;
-    int nms_max_peaks;
-    int nms_num_parts;
-    std::unique_ptr<ModelDescriptor> up_model_descriptor;
-    float* canvas; // GPU memory
-    float* joints; // GPU memory
-};
-
-struct ColumnCompare
-{
-    bool operator()(const std::vector<double>& lhs,
-                    const std::vector<double>& rhs) const
-    {
-        return lhs[2] > rhs[2];
-    }
-};
-
-
-// Global parameters
-int DISPLAY_RESOLUTION_WIDTH = 1280;
-int DISPLAY_RESOLUTION_HEIGHT = 720;
-int NET_RESOLUTION_WIDTH = 656;
-int NET_RESOLUTION_HEIGHT = 368;
-int BATCH_SIZE = 1;
-double SCALE_GAP = 0.3;
-double START_SCALE = 1;
-int NUM_GPU = 1;
-int start_device = 0;
-std::string PERSON_DETECTOR_CAFFEMODEL; //person detector
-std::string PERSON_DETECTOR_PROTO;      //person detector
-const auto MAX_PEOPLE = RENDER_MAX_PEOPLE;  // defined in render_functions.hpp
-const auto BOX_SIZE = 368;
-const auto BUFFER_SIZE = 4;    //affects latency
-const auto MAX_NUM_PARTS = 70;
-
-Global global;
-std::vector<NetCopy> net_copies;
-
 
 RTPose::RTPose(const std::string caffemodel, const std::string caffeproto, int gpu_id)
 {
@@ -128,6 +48,54 @@ RTPose::RTPose(const std::string caffemodel, const std::string caffeproto, int g
 	PERSON_DETECTOR_PROTO = caffeproto;
 	net_copies = std::vector<NetCopy>(NUM_GPU);
 	start_device = gpu_id;
+
+
+	//warm up, load caffe model in GPU
+	caffe::Caffe::SetDevice(0); //cudaSetDevice(device_id) inside
+	caffe::Caffe::set_mode(caffe::Caffe::GPU); //
+
+	net_copies[0].person_net = new caffe::Net<float>(PERSON_DETECTOR_PROTO, caffe::TEST);
+	net_copies[0].person_net->CopyTrainedLayersFrom(PERSON_DETECTOR_CAFFEMODEL);
+
+	net_copies[0].nblob_person = net_copies[0].person_net->blob_names().size();
+	net_copies[0].num_people.resize(BATCH_SIZE);
+	const std::vector<int> shape { {BATCH_SIZE, 3, NET_RESOLUTION_HEIGHT, NET_RESOLUTION_WIDTH} };
+
+	net_copies[0].person_net->blobs()[0]->Reshape(shape);
+	net_copies[0].person_net->Reshape();
+
+	caffe::NmsLayer<float> *nms_layer = (caffe::NmsLayer<float>*)net_copies[0].person_net->layer_by_name("nms").get();
+	net_copies[0].nms_max_peaks = nms_layer->GetMaxPeaks();
+
+
+	caffe::ImResizeLayer<float> *resize_layer =
+		(caffe::ImResizeLayer<float>*)net_copies[0].person_net->layer_by_name("resize").get();
+
+	resize_layer->SetStartScale(START_SCALE);
+	resize_layer->SetScaleGap(SCALE_GAP);
+
+	net_copies[0].nms_max_peaks = nms_layer->GetMaxPeaks();
+
+	net_copies[0].nms_num_parts = nms_layer->GetNumParts();
+	CHECK_LE(net_copies[0].nms_num_parts, MAX_NUM_PARTS)
+		<< "num_parts in NMS layer (" << net_copies[0].nms_num_parts << ") "
+		<< "too big ( MAX_NUM_PARTS )";
+
+	if (net_copies[0].nms_num_parts==18) {
+		ModelDescriptorFactory::createModelDescriptor(ModelDescriptorFactory::Type::COCO_18, net_copies[0].up_model_descriptor);
+		global.nms_threshold = 0.05;
+		global.connect_min_subset_cnt = 3;
+		global.connect_min_subset_score = 0.4;
+		global.connect_inter_threshold = 0.050;
+		global.connect_inter_min_above_threshold = 9;
+	} else {
+		CHECK(0) << "Unknown number of parts! Couldn't set COCO model";
+	}
+
+	net_copies[0].person_net->ForwardFrom(0);
+	cudaMalloc(&net_copies[0].canvas, DISPLAY_RESOLUTION_WIDTH * DISPLAY_RESOLUTION_HEIGHT * 3 * sizeof(float));
+	cudaMalloc(&net_copies[0].joints, MAX_NUM_PARTS*3*MAX_PEOPLE * sizeof(float) );
+
 }
 
 
@@ -477,59 +445,8 @@ int RTPose::connectLimbsCOCO(
 
 std::string RTPose::getPoseEstimation(cv::Mat oriImg) {
 
-	DISPLAY_RESOLUTION_WIDTH = oriImg.cols;
-	DISPLAY_RESOLUTION_HEIGHT = oriImg.rows;
-	NET_RESOLUTION_WIDTH = 656;
-	NET_RESOLUTION_HEIGHT = 368;
-
-	//warm up, load caffe model in GPU
-	caffe::Caffe::SetDevice(0); //cudaSetDevice(device_id) inside
-	caffe::Caffe::set_mode(caffe::Caffe::GPU); //
-
-	net_copies[0].person_net = new caffe::Net<float>(PERSON_DETECTOR_PROTO, caffe::TEST);
-	net_copies[0].person_net->CopyTrainedLayersFrom(PERSON_DETECTOR_CAFFEMODEL);
-
-	net_copies[0].nblob_person = net_copies[0].person_net->blob_names().size();
-	net_copies[0].num_people.resize(BATCH_SIZE);
-	const std::vector<int> shape { {BATCH_SIZE, 3, NET_RESOLUTION_HEIGHT, NET_RESOLUTION_WIDTH} };
-
-	net_copies[0].person_net->blobs()[0]->Reshape(shape);
-	net_copies[0].person_net->Reshape();
-
-	caffe::NmsLayer<float> *nms_layer = (caffe::NmsLayer<float>*)net_copies[0].person_net->layer_by_name("nms").get();
-	net_copies[0].nms_max_peaks = nms_layer->GetMaxPeaks();
-
-
-	caffe::ImResizeLayer<float> *resize_layer =
-		(caffe::ImResizeLayer<float>*)net_copies[0].person_net->layer_by_name("resize").get();
-
-	resize_layer->SetStartScale(START_SCALE);
-	resize_layer->SetScaleGap(SCALE_GAP);
-
-	net_copies[0].nms_max_peaks = nms_layer->GetMaxPeaks();
-
-	net_copies[0].nms_num_parts = nms_layer->GetNumParts();
-	CHECK_LE(net_copies[0].nms_num_parts, MAX_NUM_PARTS)
-		<< "num_parts in NMS layer (" << net_copies[0].nms_num_parts << ") "
-		<< "too big ( MAX_NUM_PARTS )";
-
-	if (net_copies[0].nms_num_parts==18) {
-		ModelDescriptorFactory::createModelDescriptor(ModelDescriptorFactory::Type::COCO_18, net_copies[0].up_model_descriptor);
-		global.nms_threshold = 0.05;
-		global.connect_min_subset_cnt = 3;
-		global.connect_min_subset_score = 0.4;
-		global.connect_inter_threshold = 0.050;
-		global.connect_inter_min_above_threshold = 9;
-	} else {
-		CHECK(0) << "Unknown number of parts! Couldn't set COCO model";
-	}
-
-	net_copies[0].person_net->ForwardFrom(0);
-	cudaMalloc(&net_copies[0].canvas, DISPLAY_RESOLUTION_WIDTH * DISPLAY_RESOLUTION_HEIGHT * 3 * sizeof(float));
-	cudaMalloc(&net_copies[0].joints, MAX_NUM_PARTS*3*MAX_PEOPLE * sizeof(float) );
-
-
-
+	//DISPLAY_RESOLUTION_WIDTH = oriImg.cols;
+	//DISPLAY_RESOLUTION_HEIGHT = oriImg.rows;
 
 	//pre-process input Image Mat
 	cv::Mat image_uchar;
@@ -592,7 +509,7 @@ std::string RTPose::getPoseEstimation(cv::Mat oriImg) {
 	const boost::shared_ptr<caffe::Blob<float>> heatmap_blob = net_copies[0].person_net->blob_by_name("resized_map");
 	const boost::shared_ptr<caffe::Blob<float>> joints_blob = net_copies[0].person_net->blob_by_name("joints");
 
-	//caffe::NmsLayer<float> *nms_layer = (caffe::NmsLayer<float>*)net_copies[0].person_net->layer_by_name("nms").get();
+	caffe::NmsLayer<float> *nms_layer = (caffe::NmsLayer<float>*)net_copies[0].person_net->layer_by_name("nms").get();
 
 	cudaMemcpy(net_copies[0].canvas, frame.data_for_mat, DISPLAY_RESOLUTION_WIDTH * DISPLAY_RESOLUTION_HEIGHT * 3 * sizeof(float), cudaMemcpyHostToDevice);
 

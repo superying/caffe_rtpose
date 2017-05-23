@@ -55,9 +55,21 @@ int main(int argc, char *argv[]) {
 
 	std::string res_json = rp.getPoseEstimation(img_mat);
 
-	std::cout << "Output json result.\n";
+	std::cout << "Output1 json result.\n";
 
 	std::cout << res_json;
+
+	std::cout << "\n";
+
+	cv::Mat img_mat2 = cv::imread("images/test2.jpg", CV_LOAD_IMAGE_COLOR);
+
+	std::string res_json2 = rp.getPoseEstimation(img_mat2);
+
+	std::cout << "Output2 json result.\n";
+
+	std::cout << res_json2;
+
+	std::cout << "\n";
 
     return 1;
 }
