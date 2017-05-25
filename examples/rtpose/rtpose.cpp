@@ -46,6 +46,7 @@
 #include "rtpose/modelDescriptorFactory.h"
 #include "rtpose/renderFunctions.h"
 #include "rtpose/rtPose.hpp"
+#include "json/json.h"
 
 int main(int argc, char *argv[]) {
 
@@ -70,6 +71,15 @@ int main(int argc, char *argv[]) {
 	std::cout << res_json2;
 
 	std::cout << "\n";
+
+	Json::Value root;
+	Json::Reader reader;
+	reader.parse(res_json, root);
+
+	std::cout << "Output Json Parse result.\n";
+	std::cout << root["version"];
+	std::cout << "\n";
+	std::cout << root["bodies"][0]["joints"][3];
 
     return 1;
 }
