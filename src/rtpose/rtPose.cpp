@@ -590,6 +590,10 @@ std::string RTPose::getPoseEstimation(cv::Mat oriImg) {
 	res_json += "]\n";
 	res_json += "}\n";
 
+    delete frame.data_for_wrap;
+    delete frame.data_for_mat;
+    delete frame.data;
+
 	return res_json;
 
 }
