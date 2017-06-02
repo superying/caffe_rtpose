@@ -49,6 +49,14 @@ RTPose::RTPose(const std::string caffemodel, const std::string caffeproto, int g
 	net_copies = std::vector<NetCopy>(NUM_GPU);
 	start_device = gpu_id;
 
+	
+
+	frame.data_for_wrap = new unsigned char [DISPLAY_RESOLUTION_HEIGHT * DISPLAY_RESOLUTION_WIDTH * 3]; //fill after process
+        frame.data_for_mat = new float [DISPLAY_RESOLUTION_HEIGHT * DISPLAY_RESOLUTION_WIDTH * 3];
+        frame.data = new float [BATCH_SIZE * 3 * NET_RESOLUTION_HEIGHT * NET_RESOLUTION_WIDTH];
+
+
+ 
 
 	//warm up, load caffe model in GPU
 	caffe::Caffe::SetDevice(0); //cudaSetDevice(device_id) inside
@@ -468,19 +476,19 @@ std::string RTPose::getPoseEstimation(cv::Mat oriImg) {
 						 cv::BORDER_CONSTANT, cv::Scalar(0,0,0));
 	image_uchar_prev = image_uchar;
 
-	Frame frame;
+	//Frame frame;
 	frame.ori_width = image_uchar_orig.cols;
 	frame.ori_height = image_uchar_orig.rows;
 	frame.index = 0;
 	frame.video_frame_number = 0;
-	frame.data_for_wrap = new unsigned char [DISPLAY_RESOLUTION_HEIGHT * DISPLAY_RESOLUTION_WIDTH * 3]; //fill after process
-	frame.data_for_mat = new float [DISPLAY_RESOLUTION_HEIGHT * DISPLAY_RESOLUTION_WIDTH * 3];
+	//frame.data_for_wrap = new unsigned char [DISPLAY_RESOLUTION_HEIGHT * DISPLAY_RESOLUTION_WIDTH * 3]; //fill after process
+	//frame.data_for_mat = new float [DISPLAY_RESOLUTION_HEIGHT * DISPLAY_RESOLUTION_WIDTH * 3];
 	process_and_pad_image(frame.data_for_mat, image_uchar, DISPLAY_RESOLUTION_WIDTH, DISPLAY_RESOLUTION_HEIGHT, 0);
 
 	frame.scale = scale;
 	//pad and transform to float
 	int offset = 3 * NET_RESOLUTION_HEIGHT * NET_RESOLUTION_WIDTH;
-	frame.data = new float [BATCH_SIZE * offset];
+	//frame.data = new float [BATCH_SIZE * offset];
 	int target_width, target_height;
 	cv::Mat image_temp;
 	//LOG(ERROR) << "frame.index: " << frame.index;
@@ -590,14 +598,29 @@ std::string RTPose::getPoseEstimation(cv::Mat oriImg) {
 	res_json += "]\n";
 	res_json += "}\n";
 
-    delete frame.data_for_wrap;
-    delete frame.data_for_mat;
-    delete frame.data;
+    //delete frame.data_for_wrap;
+    //delete frame.data_for_mat;
+    //delete frame.data;
 
 	return res_json;
 
 }
 
 
+
+void RTPose::freeGPU() {
+
+	//delete frame.data_for_wrap;
+	//delete frame.data_for_mat;
+	//delete frame.data;
+
+
+	
+	//cudaFree(&net_copies[0].canvas);
+	//cudaFree(&net_copies[0].joints);
+	
+	cudaDeviceReset();
+
+}
 
 

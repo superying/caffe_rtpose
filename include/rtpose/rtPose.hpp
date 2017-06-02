@@ -123,6 +123,8 @@ public:
 
     std::string getPoseEstimation(cv::Mat oriImg);
 
+    void freeGPU();
+
 private:
     // Global parameters
     int DISPLAY_RESOLUTION_WIDTH = 1280;
@@ -143,7 +145,8 @@ private:
 
     Global global;
     std::vector<NetCopy> net_copies;
-
+    
+    Frame frame;
 
 
 };
