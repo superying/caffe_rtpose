@@ -50,7 +50,7 @@
 
 int main(int argc, char *argv[]) {
 
-	RTPose* rp = new RTPose("model/coco/pose_iter_440000.caffemodel", "model/coco/pose_deploy_linevec.prototxt", 0);
+	RTPose rp("model/coco/pose_iter_440000.caffemodel", "model/coco/pose_deploy_linevec.prototxt", 0);
 
 	cv::Mat img_mat = cv::imread("images/test.jpg", CV_LOAD_IMAGE_COLOR);
 
@@ -61,7 +61,8 @@ int main(int argc, char *argv[]) {
 	//std::cout << "continue! \n";
 
 	for(int i=0; i<100; i++) {
-		std::string res_json = rp->getPoseEstimation(img_mat);
+		std::cout << "index: " << i << "\n";
+		std::string res_json = rp.getPoseEstimation(img_mat);
 	}
 
 
@@ -72,7 +73,7 @@ int main(int argc, char *argv[]) {
 	//std::cout << "continue! \n";
 
 	
-	rp->freeGPU();
+	rp.freeGPU();
 
 	//delete rp;
 
@@ -91,6 +92,7 @@ int main(int argc, char *argv[]) {
 	std::cout << "init ready! \n";
 	
 	for(int k=0; k<100; k++) {
+		std::cout << "index: " << k << "\n";
                 std::string res_json2 = rp2.getPoseEstimation(img_mat2);
         }
 	

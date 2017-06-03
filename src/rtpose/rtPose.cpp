@@ -48,12 +48,12 @@ RTPose::RTPose(const std::string caffemodel, const std::string caffeproto, int g
 	PERSON_DETECTOR_PROTO = caffeproto;
 	net_copies = std::vector<NetCopy>(NUM_GPU);
 	start_device = gpu_id;
-
+	global.part_to_show = 0;
 	
 
-	frame.data_for_wrap = new unsigned char [DISPLAY_RESOLUTION_HEIGHT * DISPLAY_RESOLUTION_WIDTH * 3]; //fill after process
-        frame.data_for_mat = new float [DISPLAY_RESOLUTION_HEIGHT * DISPLAY_RESOLUTION_WIDTH * 3];
-        frame.data = new float [BATCH_SIZE * 3 * NET_RESOLUTION_HEIGHT * NET_RESOLUTION_WIDTH];
+	//frame.data_for_wrap = new unsigned char [DISPLAY_RESOLUTION_HEIGHT * DISPLAY_RESOLUTION_WIDTH * 3]; //fill after process
+        //frame.data_for_mat = new float [DISPLAY_RESOLUTION_HEIGHT * DISPLAY_RESOLUTION_WIDTH * 3];
+        //frame.data = new float [BATCH_SIZE * 3 * NET_RESOLUTION_HEIGHT * NET_RESOLUTION_WIDTH];
 
 
  
@@ -103,6 +103,11 @@ RTPose::RTPose(const std::string caffemodel, const std::string caffeproto, int g
 	net_copies[0].person_net->ForwardFrom(0);
 	cudaMalloc(&net_copies[0].canvas, DISPLAY_RESOLUTION_WIDTH * DISPLAY_RESOLUTION_HEIGHT * 3 * sizeof(float));
 	cudaMalloc(&net_copies[0].joints, MAX_NUM_PARTS*3*MAX_PEOPLE * sizeof(float) );
+
+
+	frame.data_for_wrap = new unsigned char [DISPLAY_RESOLUTION_HEIGHT * DISPLAY_RESOLUTION_WIDTH * 3]; //fill after process
+        frame.data_for_mat = new float [DISPLAY_RESOLUTION_HEIGHT * DISPLAY_RESOLUTION_WIDTH * 3];
+        frame.data = new float [BATCH_SIZE * 3 * NET_RESOLUTION_HEIGHT * NET_RESOLUTION_WIDTH];
 
 }
 
@@ -610,9 +615,9 @@ std::string RTPose::getPoseEstimation(cv::Mat oriImg) {
 
 void RTPose::freeGPU() {
 
-	//delete frame.data_for_wrap;
-	//delete frame.data_for_mat;
-	//delete frame.data;
+	delete frame.data_for_wrap;
+	delete frame.data_for_mat;
+	delete frame.data;
 
 
 	
